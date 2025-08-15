@@ -1,0 +1,642 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services - Distributed Architecture
+  
+  # PostgreSQL Primary (Master) - US-East
+  postgres-primary:
+    image: postgres:15-alpine
+    container_name: roleplay_postgres_primary
+    environment:
+      POSTGRES_DB: roleplay_platform
+      POSTGRES_USER: roleplay_user
+      POSTGRES_PASSWORD: roleplay_password
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: repl_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infrastructure/postgres/primary.conf:/etc/postgresql/postgresql.conf
+      - ./infrastructure/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roleplay_user -d roleplay_platform"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "distributed.role=primary"
+      - "distributed.region=us-east"
+
+  # PostgreSQL Replica - US-West
+  postgres-replica-west:
+    image: postgres:15-alpine
+    container_name: roleplay_postgres_replica_west
+    environment:
+      POSTGRES_USER: roleplay_user
+      POSTGRES_PASSWORD: roleplay_password
+      POSTGRES_MASTER_SERVICE: postgres-primary
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: repl_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_replica_west_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/replica.conf:/etc/postgresql/postgresql.conf
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roleplay_user"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "distributed.role=replica"
+      - "distributed.region=us-west"
+
+  # PostgreSQL Replica - EU
+  postgres-replica-eu:
+    image: postgres:15-alpine
+    container_name: roleplay_postgres_replica_eu
+    environment:
+      POSTGRES_USER: roleplay_user
+      POSTGRES_PASSWORD: roleplay_password
+      POSTGRES_MASTER_SERVICE: postgres-primary
+      POSTGRES_REPLICATION_USER: replicator
+      POSTGRES_REPLICATION_PASSWORD: repl_password
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_replica_eu_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/replica.conf:/etc/postgresql/postgresql.conf
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U roleplay_user"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      - "distributed.role=replica"
+      - "distributed.region=eu-central"
+
+  # Redis Cluster Nodes
+  redis-cluster-1:
+    image: redis/redis-stack-server:latest
+    container_name: roleplay_redis_cluster_1
+    ports:
+      - "7001:6379"
+      - "17001:16379"
+    volumes:
+      - redis_cluster_1_data:/data
+      - ./infrastructure/redis/cluster.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf --port 6379 --cluster-enabled yes --cluster-config-file nodes-6379.conf --cluster-node-timeout 5000 --appendonly yes
+    labels:
+      - "distributed.role=cache-master"
+      - "distributed.region=us-east"
+
+  redis-cluster-2:
+    image: redis/redis-stack-server:latest
+    container_name: roleplay_redis_cluster_2
+    ports:
+      - "7002:6379"
+      - "17002:16379"
+    volumes:
+      - redis_cluster_2_data:/data
+      - ./infrastructure/redis/cluster.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf --port 6379 --cluster-enabled yes --cluster-config-file nodes-6379.conf --cluster-node-timeout 5000 --appendonly yes
+    labels:
+      - "distributed.role=cache-master"
+      - "distributed.region=us-west"
+
+  redis-cluster-3:
+    image: redis/redis-stack-server:latest
+    container_name: roleplay_redis_cluster_3
+    ports:
+      - "7003:6379"
+      - "17003:16379"
+    volumes:
+      - redis_cluster_3_data:/data
+      - ./infrastructure/redis/cluster.conf:/usr/local/etc/redis/redis.conf
+    command: redis-server /usr/local/etc/redis/redis.conf --port 6379 --cluster-enabled yes --cluster-config-file nodes-6379.conf --cluster-node-timeout 5000 --appendonly yes
+    labels:
+      - "distributed.role=cache-master"
+      - "distributed.region=eu-central"
+
+  # Redis Sentinel for High Availability
+  redis-sentinel-1:
+    image: redis:7-alpine
+    container_name: roleplay_redis_sentinel_1
+    ports:
+      - "26379:26379"
+    volumes:
+      - ./infrastructure/redis/sentinel.conf:/etc/redis/sentinel.conf
+    command: redis-sentinel /etc/redis/sentinel.conf
+    depends_on:
+      - redis-cluster-1
+      - redis-cluster-2
+      - redis-cluster-3
+    labels:
+      - "distributed.role=cache-sentinel"
+
+  # Redis Cluster Initialization
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: roleplay_redis_cluster_init
+    depends_on:
+      - redis-cluster-1
+      - redis-cluster-2
+      - redis-cluster-3
+    command: >
+      sh -c "
+        sleep 10 &&
+        redis-cli --cluster create 
+        redis-cluster-1:6379 
+        redis-cluster-2:6379 
+        redis-cluster-3:6379 
+        --cluster-replicas 0 --cluster-yes
+      "
+
+  # Vector Database Cluster for AI embeddings
+  qdrant-cluster-1:
+    image: qdrant/qdrant:latest
+    container_name: roleplay_qdrant_cluster_1
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_cluster_1_data:/qdrant/storage
+      - ./infrastructure/qdrant/cluster.yaml:/qdrant/config/production.yaml
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__CLUSTER__ENABLED: true
+      QDRANT__CLUSTER__P2P__PORT: 6335
+    labels:
+      - "distributed.role=vector-db"
+      - "distributed.region=us-east"
+
+  qdrant-cluster-2:
+    image: qdrant/qdrant:latest
+    container_name: roleplay_qdrant_cluster_2
+    ports:
+      - "6336:6333"
+      - "6337:6334"
+    volumes:
+      - qdrant_cluster_2_data:/qdrant/storage
+      - ./infrastructure/qdrant/cluster.yaml:/qdrant/config/production.yaml
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+      QDRANT__CLUSTER__ENABLED: true
+      QDRANT__CLUSTER__P2P__PORT: 6335
+    depends_on:
+      - qdrant-cluster-1
+    labels:
+      - "distributed.role=vector-db"
+      - "distributed.region=us-west"
+
+  # Message Queue Cluster
+  rabbitmq-cluster-1:
+    image: rabbitmq:3-management-alpine
+    container_name: roleplay_rabbitmq_cluster_1
+    environment:
+      RABBITMQ_DEFAULT_USER: roleplay_user
+      RABBITMQ_DEFAULT_PASS: roleplay_password
+      RABBITMQ_ERLANG_COOKIE: "SWQOKODSQALRPCLNMEQG"
+      RABBITMQ_USE_LONGNAME: true
+      RABBITMQ_NODENAME: rabbit@rabbitmq-cluster-1
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_cluster_1_data:/var/lib/rabbitmq
+      - ./infrastructure/rabbitmq/cluster.conf:/etc/rabbitmq/rabbitmq.conf
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 5
+    labels:
+      - "distributed.role=message-queue"
+      - "distributed.region=us-east"
+
+  rabbitmq-cluster-2:
+    image: rabbitmq:3-management-alpine
+    container_name: roleplay_rabbitmq_cluster_2
+    environment:
+      RABBITMQ_DEFAULT_USER: roleplay_user
+      RABBITMQ_DEFAULT_PASS: roleplay_password
+      RABBITMQ_ERLANG_COOKIE: "SWQOKODSQALRPCLNMEQG"
+      RABBITMQ_USE_LONGNAME: true
+      RABBITMQ_NODENAME: rabbit@rabbitmq-cluster-2
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - rabbitmq_cluster_2_data:/var/lib/rabbitmq
+      - ./infrastructure/rabbitmq/cluster.conf:/etc/rabbitmq/rabbitmq.conf
+    depends_on:
+      - rabbitmq-cluster-1
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 5
+    labels:
+      - "distributed.role=message-queue"
+      - "distributed.region=us-west"
+
+  # Apache Kafka for High-Throughput Messaging
+  kafka-zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: roleplay_kafka_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - kafka_zookeeper_data:/var/lib/zookeeper/data
+      - kafka_zookeeper_logs:/var/lib/zookeeper/log
+
+  kafka-broker-1:
+    image: confluentinc/cp-kafka:latest
+    container_name: roleplay_kafka_broker_1
+    depends_on:
+      - kafka-zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: kafka-zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-1:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+      KAFKA_NUM_PARTITIONS: 8
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+    volumes:
+      - kafka_broker_1_data:/var/lib/kafka/data
+    labels:
+      - "distributed.role=streaming-platform"
+      - "distributed.region=us-east"
+
+  kafka-broker-2:
+    image: confluentinc/cp-kafka:latest
+    container_name: roleplay_kafka_broker_2
+    depends_on:
+      - kafka-zookeeper
+    ports:
+      - "9093:9092"
+      - "29093:29092"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: kafka-zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-broker-2:9092,PLAINTEXT_HOST://localhost:29093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: true
+      KAFKA_NUM_PARTITIONS: 8
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+    volumes:
+      - kafka_broker_2_data:/var/lib/kafka/data
+    labels:
+      - "distributed.role=streaming-platform"
+      - "distributed.region=us-west"
+
+  # Kafka Schema Registry
+  kafka-schema-registry:
+    image: confluentinc/cp-schema-registry:latest
+    container_name: roleplay_kafka_schema_registry
+    depends_on:
+      - kafka-broker-1
+      - kafka-broker-2
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: kafka-schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka-broker-1:9092,kafka-broker-2:9092
+
+  # Elasticsearch Cluster for Search and Analytics
+  elasticsearch-master:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: roleplay_elasticsearch_master
+    environment:
+      - node.name=elasticsearch-master
+      - cluster.name=roleplay-cluster
+      - discovery.seed_hosts=elasticsearch-data-1,elasticsearch-data-2
+      - cluster.initial_master_nodes=elasticsearch-master
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      - xpack.security.enabled=false
+      - node.roles=master
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_master_data:/usr/share/elasticsearch/data
+    labels:
+      - "distributed.role=search-master"
+
+  elasticsearch-data-1:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: roleplay_elasticsearch_data_1
+    environment:
+      - node.name=elasticsearch-data-1
+      - cluster.name=roleplay-cluster
+      - discovery.seed_hosts=elasticsearch-master,elasticsearch-data-2
+      - cluster.initial_master_nodes=elasticsearch-master
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+      - node.roles=data,ingest
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9201:9200"
+    volumes:
+      - elasticsearch_data_1_data:/usr/share/elasticsearch/data
+    depends_on:
+      - elasticsearch-master
+    labels:
+      - "distributed.role=search-data"
+      - "distributed.region=us-east"
+
+  elasticsearch-data-2:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: roleplay_elasticsearch_data_2
+    environment:
+      - node.name=elasticsearch-data-2
+      - cluster.name=roleplay-cluster
+      - discovery.seed_hosts=elasticsearch-master,elasticsearch-data-1
+      - cluster.initial_master_nodes=elasticsearch-master
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+      - node.roles=data,ingest
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9202:9200"
+    volumes:
+      - elasticsearch_data_2_data:/usr/share/elasticsearch/data
+    depends_on:
+      - elasticsearch-master
+    labels:
+      - "distributed.role=search-data"
+      - "distributed.region=us-west"
+
+  # Service Discovery
+  consul:
+    image: consul:latest
+    container_name: roleplay_consul
+    ports:
+      - "8500:8500"
+      - "8600:8600/udp"
+    command: agent -server -ui -node=server-1 -bootstrap-expect=1 -client=0.0.0.0
+    volumes:
+      - consul_data:/consul/data
+
+  # Monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: roleplay_prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: roleplay_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infrastructure/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+
+  # Microservices
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: roleplay_api_gateway
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://roleplay_user:roleplay_password@postgres:5432/roleplay_platform
+      - REDIS_URL=redis://redis:6379/0
+      - CONSUL_URL=http://consul:8500
+      - USER_SERVICE_URL=http://user-management:8001
+      - ROLEPLAY_SERVICE_URL=http://roleplay-service:8002
+      - AI_SERVICE_URL=http://ai-orchestration:8003
+      - NOTIFICATION_SERVICE_URL=http://notification-service:8004
+      - ANALYTICS_SERVICE_URL=http://analytics-service:8005
+    depends_on:
+      - postgres
+      - redis
+      - consul
+      - user-management
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  user-management:
+    build:
+      context: ./services/user-management
+      dockerfile: Dockerfile
+    container_name: roleplay_user_management
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://roleplay_user:roleplay_password@postgres:5432/roleplay_platform
+      - REDIS_URL=redis://redis:6379/1
+      - CONSUL_URL=http://consul:8500
+    depends_on:
+      - postgres
+      - redis
+      - consul
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  roleplay-service:
+    build:
+      context: ./services/roleplay-service
+      dockerfile: Dockerfile
+    container_name: roleplay_service
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://roleplay_user:roleplay_password@postgres:5432/roleplay_platform
+      - REDIS_URL=redis://redis:6379/2
+      - QDRANT_URL=http://qdrant:6333
+      - CONSUL_URL=http://consul:8500
+      - AI_SERVICE_URL=http://ai-orchestration:8003
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+      - consul
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  ai-orchestration:
+    build:
+      context: ./services/ai-orchestration
+      dockerfile: Dockerfile
+    container_name: roleplay_ai_orchestration
+    ports:
+      - "8003:8003"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://roleplay_user:roleplay_password@postgres:5432/roleplay_platform
+      - REDIS_URL=redis://redis:6379/3
+      - QDRANT_URL=http://qdrant:6333
+      - CONSUL_URL=http://consul:8500
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    depends_on:
+      - postgres
+      - redis
+      - qdrant
+      - consul
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+      dockerfile: Dockerfile
+    container_name: roleplay_notification
+    ports:
+      - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://roleplay_user:roleplay_password@postgres:5432/roleplay_platform
+      - REDIS_URL=redis://redis:6379/4
+      - RABBITMQ_URL=amqp://roleplay_user:roleplay_password@rabbitmq:5672/
+      - CONSUL_URL=http://consul:8500
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+      - consul
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    container_name: roleplay_analytics
+    ports:
+      - "8005:8005"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://roleplay_user:roleplay_password@postgres:5432/roleplay_platform
+      - REDIS_URL=redis://redis:6379/5
+      - CONSUL_URL=http://consul:8500
+    depends_on:
+      - postgres
+      - redis
+      - consul
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  real-time-communication:
+    build:
+      context: ./services/real-time-communication
+      dockerfile: Dockerfile
+    container_name: roleplay_realtime
+    ports:
+      - "8006:8006"
+    environment:
+      - REDIS_URL=redis://redis:6379/6
+      - CONSUL_URL=http://consul:8500
+    depends_on:
+      - redis
+      - consul
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  # PostgreSQL Volumes
+  postgres_primary_data:
+  postgres_replica_west_data:
+  postgres_replica_eu_data:
+  
+  # Redis Cluster Volumes
+  redis_cluster_1_data:
+  redis_cluster_2_data:
+  redis_cluster_3_data:
+  
+  # Qdrant Cluster Volumes
+  qdrant_cluster_1_data:
+  qdrant_cluster_2_data:
+  
+  # RabbitMQ Cluster Volumes
+  rabbitmq_cluster_1_data:
+  rabbitmq_cluster_2_data:
+  
+  # Kafka Volumes
+  kafka_zookeeper_data:
+  kafka_zookeeper_logs:
+  kafka_broker_1_data:
+  kafka_broker_2_data:
+  
+  # Elasticsearch Volumes
+  elasticsearch_master_data:
+  elasticsearch_data_1_data:
+  elasticsearch_data_2_data:
+  
+  # Monitoring Volumes
+  consul_data:
+  prometheus_data:
+  grafana_data:
+  jaeger_data:
+
+networks:
+  default:
+    name: roleplay_network

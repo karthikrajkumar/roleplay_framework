@@ -1,0 +1,815 @@
+---
+# Distributed Systems Architecture for Kubernetes Production Deployment
+# This manifest deploys the complete distributed roleplay platform with
+# advanced consensus, caching, load balancing, and fault tolerance systems
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: roleplay-platform
+  labels:
+    name: roleplay-platform
+    environment: production
+
+---
+# Redis Cluster for Distributed Caching
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+  namespace: roleplay-platform
+spec:
+  serviceName: redis-cluster
+  replicas: 6
+  selector:
+    matchLabels:
+      app: redis-cluster
+  template:
+    metadata:
+      labels:
+        app: redis-cluster
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        - containerPort: 16379
+        env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        command:
+        - redis-server
+        - /etc/redis/redis.conf
+        - --port
+        - "6379"
+        - --cluster-enabled
+        - "yes"
+        - --cluster-config-file
+        - nodes.conf
+        - --cluster-node-timeout
+        - "5000"
+        - --appendonly
+        - "yes"
+        - --bind
+        - "0.0.0.0"
+        volumeMounts:
+        - name: redis-data
+          mountPath: /data
+        - name: redis-config
+          mountPath: /etc/redis
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      volumes:
+      - name: redis-config
+        configMap:
+          name: redis-cluster-config
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-cluster-config
+  namespace: roleplay-platform
+data:
+  redis.conf: |
+    protected-mode no
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+    daemonize no
+    supervised no
+    pidfile /var/run/redis_6379.pid
+    loglevel notice
+    databases 16
+    always-show-logo yes
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+    maxmemory 1gb
+    maxmemory-policy allkeys-lru
+    cluster-enabled yes
+    cluster-config-file nodes.conf
+    cluster-node-timeout 5000
+    cluster-announce-ip ${POD_IP}
+
+---
+# PostgreSQL Primary-Replica Setup
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  namespace: roleplay-platform
+spec:
+  serviceName: postgres-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-primary
+      role: master
+  template:
+    metadata:
+      labels:
+        app: postgres-primary
+        role: master
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        env:
+        - name: POSTGRES_DB
+          value: roleplay_platform
+        - name: POSTGRES_USER
+          value: roleplay_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        - name: POSTGRES_REPLICATION_USER
+          value: replicator
+        - name: POSTGRES_REPLICATION_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: replication-password
+        ports:
+        - containerPort: 5432
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-config
+          mountPath: /etc/postgresql
+        command:
+        - postgres
+        - -c
+        - config_file=/etc/postgresql/postgresql.conf
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - roleplay_user
+            - -d
+            - roleplay_platform
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - roleplay_user
+            - -d
+            - roleplay_platform
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: postgres-config
+        configMap:
+          name: postgres-config
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 100Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-replica
+  namespace: roleplay-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: postgres-replica
+      role: slave
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+        role: slave
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        env:
+        - name: PGUSER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: password
+        - name: POSTGRES_MASTER_SERVICE
+          value: postgres-primary-service
+        - name: POSTGRES_REPLICATION_USER
+          value: replicator
+        - name: POSTGRES_REPLICATION_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: replication-password
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+---
+# Kafka Cluster for Event Streaming
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: roleplay-platform
+spec:
+  serviceName: kafka
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:latest
+        ports:
+        - containerPort: 9092
+        - containerPort: 9093
+        env:
+        - name: KAFKA_BROKER_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: zookeeper:2181
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: PLAINTEXT://$(POD_NAME).kafka:9092
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+          value: "2"
+        - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+          value: "3"
+        - name: KAFKA_AUTO_CREATE_TOPICS_ENABLE
+          value: "true"
+        - name: KAFKA_NUM_PARTITIONS
+          value: "8"
+        - name: KAFKA_DEFAULT_REPLICATION_FACTOR
+          value: "3"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: kafka-storage
+          mountPath: /var/lib/kafka/data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+  volumeClaimTemplates:
+  - metadata:
+      name: kafka-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 50Gi
+
+---
+# Distributed Load Balancer
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: distributed-load-balancer
+  namespace: roleplay-platform
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: distributed-load-balancer
+  template:
+    metadata:
+      labels:
+        app: distributed-load-balancer
+    spec:
+      containers:
+      - name: load-balancer
+        image: roleplay/distributed-load-balancer:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: CLUSTER_ID
+          value: "production-cluster"
+        - name: REGION
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['kubernetes.io/region']
+        - name: REDIS_CLUSTER_ENDPOINTS
+          value: "redis-cluster:6379"
+        - name: POSTGRES_PRIMARY_ENDPOINT
+          value: "postgres-primary-service:5432"
+        - name: KAFKA_ENDPOINTS
+          value: "kafka:9092"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: config
+        configMap:
+          name: load-balancer-config
+
+---
+# AI State Consensus Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-consensus-manager
+  namespace: roleplay-platform
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ai-consensus-manager
+  template:
+    metadata:
+      labels:
+        app: ai-consensus-manager
+    spec:
+      containers:
+      - name: consensus-manager
+        image: roleplay/ai-consensus-manager:latest
+        ports:
+        - containerPort: 8081
+        env:
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: CLUSTER_CONFIG
+          valueFrom:
+            configMapKeyRef:
+              name: consensus-config
+              key: cluster-config.json
+        - name: REDIS_ENDPOINTS
+          value: "redis-cluster:6379"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /consensus/health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+---
+# Geo-Replication Manager
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geo-replication-manager
+  namespace: roleplay-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: geo-replication-manager
+  template:
+    metadata:
+      labels:
+        app: geo-replication-manager
+    spec:
+      containers:
+      - name: replication-manager
+        image: roleplay/geo-replication-manager:latest
+        ports:
+        - containerPort: 8082
+        env:
+        - name: LOCAL_REGION_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['kubernetes.io/region']
+        - name: NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POSTGRES_ENDPOINTS
+          value: "postgres-primary-service:5432,postgres-replica:5432"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+
+---
+# Failure Detection System
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failure-detector
+  namespace: roleplay-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: failure-detector
+  template:
+    metadata:
+      labels:
+        app: failure-detector
+    spec:
+      containers:
+      - name: failure-detector
+        image: roleplay/failure-detector:latest
+        ports:
+        - containerPort: 8083
+        env:
+        - name: DETECTOR_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: MONITORING_TARGETS
+          value: "redis-cluster,postgres-primary,kafka,ai-consensus-manager"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /detector/health
+            port: 8083
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+---
+# Services for Component Communication
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-service
+  namespace: roleplay-platform
+spec:
+  selector:
+    app: redis-cluster
+  ports:
+  - name: redis
+    port: 6379
+    targetPort: 6379
+  - name: cluster
+    port: 16379
+    targetPort: 16379
+  clusterIP: None
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary-service
+  namespace: roleplay-platform
+spec:
+  selector:
+    app: postgres-primary
+    role: master
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replica-service
+  namespace: roleplay-platform
+spec:
+  selector:
+    app: postgres-replica
+    role: slave
+  ports:
+  - port: 5432
+    targetPort: 5432
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-service
+  namespace: roleplay-platform
+spec:
+  selector:
+    app: kafka
+  ports:
+  - port: 9092
+    targetPort: 9092
+  clusterIP: None
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: distributed-load-balancer-service
+  namespace: roleplay-platform
+spec:
+  selector:
+    app: distributed-load-balancer
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: LoadBalancer
+
+---
+# Horizontal Pod Autoscalers
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: load-balancer-hpa
+  namespace: roleplay-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: distributed-load-balancer
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: consensus-manager-hpa
+  namespace: roleplay-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-consensus-manager
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+
+---
+# Network Policies for Security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: distributed-systems-network-policy
+  namespace: roleplay-platform
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: distributed-load-balancer
+    - podSelector:
+        matchLabels:
+          app: ai-consensus-manager
+    - podSelector:
+        matchLabels:
+          app: geo-replication-manager
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 9092
+  egress:
+  - {}
+
+---
+# Pod Disruption Budgets
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-cluster-pdb
+  namespace: roleplay-platform
+spec:
+  minAvailable: 4
+  selector:
+    matchLabels:
+      app: redis-cluster
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kafka-pdb
+  namespace: roleplay-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: kafka
+
+---
+# Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: roleplay-platform
+type: Opaque
+data:
+  password: cm9sZXBsYXlfcGFzc3dvcmQ=  # roleplay_password base64 encoded
+  replication-password: cmVwbF9wYXNzd29yZA==  # repl_password base64 encoded
+
+---
+# ConfigMaps
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: roleplay-platform
+data:
+  postgresql.conf: |
+    # PostgreSQL configuration for distributed setup
+    listen_addresses = '*'
+    port = 5432
+    max_connections = 200
+    shared_buffers = 1GB
+    effective_cache_size = 3GB
+    work_mem = 50MB
+    maintenance_work_mem = 512MB
+    
+    # Replication settings
+    wal_level = replica
+    max_wal_senders = 10
+    max_replication_slots = 10
+    hot_standby = on
+    
+    # Logging
+    log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+    log_checkpoints = on
+    log_connections = on
+    log_disconnections = on
+    log_lock_waits = on
+    
+    # Performance tuning
+    checkpoint_completion_target = 0.7
+    wal_buffers = 16MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+
+  pg_hba.conf: |
+    # PostgreSQL Client Authentication Configuration File
+    local   all             all                                     trust
+    host    all             all             127.0.0.1/32            md5
+    host    all             all             ::1/128                 md5
+    host    all             all             0.0.0.0/0               md5
+    host    replication     replicator      0.0.0.0/0               md5
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-balancer-config
+  namespace: roleplay-platform
+data:
+  config.yaml: |
+    cluster_id: "production-cluster"
+    region: "us-east-1"
+    default_strategy: "ml_optimized"
+    health_check_interval: 10.0
+    prediction_interval: 60.0
+    circuit_breaker_threshold: 0.5
+    circuit_breaker_timeout: 60.0
+    
+    nodes:
+      - id: "node-1"
+        region: "us-east-1"
+        capacity:
+          cpu: 100.0
+          memory: 100.0
+          network: 1000.0
+        specializations: ["ai_inference", "user_interaction"]
+        weight: 1.0
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consensus-config
+  namespace: roleplay-platform
+data:
+  cluster-config.json: |
+    {
+      "cluster_name": "ai-consensus-cluster",
+      "nodes": [
+        {
+          "id": "consensus-node-1",
+          "region": "us-east-1",
+          "is_leader": true
+        },
+        {
+          "id": "consensus-node-2", 
+          "region": "us-west-1",
+          "is_leader": false
+        },
+        {
+          "id": "consensus-node-3",
+          "region": "eu-central-1",
+          "is_leader": false
+        }
+      ]
+    }

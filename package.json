@@ -1,0 +1,94 @@
+{
+  "name": "ai-roleplay-platform",
+  "version": "1.0.0",
+  "description": "Advanced AI Roleplay Training Platform - Enterprise Grade Solution",
+  "private": true,
+  "workspaces": [
+    "services/*",
+    "web-app",
+    "mobile",
+    "tools/*"
+  ],
+  "scripts": {
+    "dev": "docker-compose up -d && concurrently \"npm run dev:services\" \"npm run dev:web\"",
+    "dev:services": "concurrently \"npm run dev -w services/api-gateway\" \"npm run dev -w services/user-management\" \"npm run dev -w services/content-management\"",
+    "dev:web": "npm run dev -w web-app",
+    "dev:mobile": "npm run dev -w mobile",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "test:unit": "npm run test:unit --workspaces",
+    "test:integration": "npm run test:integration --workspaces",
+    "test:e2e": "npm run test:e2e -w web-app",
+    "lint": "npm run lint --workspaces",
+    "lint:fix": "npm run lint:fix --workspaces",
+    "format": "prettier --write .",
+    "type-check": "npm run type-check --workspaces",
+    "clean": "npm run clean --workspaces && rm -rf node_modules",
+    "setup": "npm install && npm run setup --workspaces",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "infra:deploy": "cd infrastructure && terraform apply",
+    "infra:destroy": "cd infrastructure && terraform destroy",
+    "k8s:deploy": "kubectl apply -f infrastructure/k8s/",
+    "k8s:delete": "kubectl delete -f infrastructure/k8s/",
+    "migration:generate": "npm run migration:generate -w services/user-management",
+    "migration:run": "npm run migration:run --workspaces",
+    "migration:rollback": "npm run migration:rollback --workspaces",
+    "docs:build": "typedoc --options typedoc.json",
+    "docs:serve": "http-server docs -p 8080",
+    "security:audit": "npm audit --audit-level=moderate --workspaces",
+    "security:scan": "snyk test --all-projects",
+    "release": "semantic-release"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@types/node": "^20.10.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.55.0",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0",
+    "prettier": "^3.1.0",
+    "semantic-release": "^22.0.8",
+    "typedoc": "^0.25.4",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/ai-roleplay-platform"
+  },
+  "keywords": [
+    "ai",
+    "roleplay",
+    "training",
+    "enterprise",
+    "microservices",
+    "typescript",
+    "react",
+    "node.js"
+  ],
+  "author": "AI Roleplay Platform Team",
+  "license": "PROPRIETARY",
+  "lint-staged": {
+    "*.{js,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  }
+}
