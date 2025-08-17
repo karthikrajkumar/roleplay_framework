@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
-COPY requirements-dev.txt .
+COPY services/user-management/requirements.txt .
+COPY services/user-management/requirements-dev.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -45,10 +45,13 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
-COPY . .
+COPY services/user-management/ .
 
-# Copy shared library
-COPY ../../shared ./shared
+# Copy shared library (Note: shared library should be copied from build context)
+# The shared directory should be copied at build time using build context
+# Example: docker build -f services/user-management/Dockerfile --build-arg SHARED_PATH=./shared .
+ARG SHARED_PATH=./shared
+COPY ${SHARED_PATH} ./shared
 
 # Set permissions
 RUN chown -R appuser:appuser /app

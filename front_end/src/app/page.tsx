@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { GraduationCap, Settings, Mail, Lock, Building2 } from "lucide-react";
+import { GraduationCap, Settings, Mail, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,41 +27,35 @@ export default function HomePage() {
 
   if (!selectedRole) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 flex items-center justify-center p-6">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           className="w-full max-w-lg"
         >
-          <Card className="backdrop-blur-xl bg-white/95 border-slate-200 shadow-2xl">
-            <CardHeader className="text-center space-y-6 pb-8">
-              <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                className="mx-auto w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-full flex items-center justify-center shadow-lg border-2 border-slate-300"
-              >
-                <Building2 className="w-8 h-8 text-white" />
-              </motion.div>
-              
+          <Card className="bg-white border border-gray-200 shadow-lg shadow-gray-200/50 rounded-2xl">
+            <CardHeader className="text-center space-y-4 pb-4 px-6 pt-6">
               <div>
-                <CardTitle className="text-3xl font-bold text-slate-900 mb-3">
-                  AI Coaching Platform
+                <CardTitle className="text-3xl font-bold text-gray-900 mb-2">
+                  AI Coaching{" "}
+                  <span className="bg-gradient-to-r from-blue-600 via-teal-600 to-green-600 bg-clip-text text-transparent">
+                    Platform
+                  </span>
                 </CardTitle>
-                <CardDescription className="text-lg text-slate-600">
-                  Transform your skills with AI-powered roleplay coaching
+                <CardDescription className="text-base text-gray-600 max-w-md mx-auto leading-relaxed">
+                  Transform your skills with AI-powered roleplay coaching, grounded in the methods you trust
                 </CardDescription>
               </div>
             </CardHeader>
 
-            <CardContent className="space-y-8">
-              <div className="text-center space-y-3">
-                <h2 className="text-2xl font-semibold text-slate-900">Welcome Back</h2>
-                <p className="text-slate-600">Choose your role and sign in to continue</p>
+            <CardContent className="space-y-6 px-6 pb-6">
+              <div className="text-center space-y-2">
+                <h2 className="text-xl font-semibold text-gray-900">Welcome Back</h2>
+                <p className="text-sm text-gray-500">Choose your role and sign in to continue</p>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <motion.div
                     whileHover={{ scale: 1.02 }}
@@ -69,8 +63,7 @@ export default function HomePage() {
                   >
                     <Button
                       onClick={() => setSelectedRole('learner')}
-                      className="w-full h-14 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-800 hover:to-slate-900 text-white font-semibold shadow-lg border border-slate-300"
-                      size="lg"
+                      className="w-full h-12 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 hover:border-blue-300 font-semibold shadow-sm rounded-xl"
                     >
                       <GraduationCap className="w-5 h-5 mr-2" />
                       Learner
@@ -83,9 +76,7 @@ export default function HomePage() {
                   >
                     <Button
                       onClick={() => setSelectedRole('admin')}
-                      variant="outline"
-                      className="w-full h-14 border-2 border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-400 font-semibold shadow-lg"
-                      size="lg"
+                      className="w-full h-12 bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 hover:border-gray-300 font-semibold shadow-sm rounded-xl"
                     >
                       <Settings className="w-5 h-5 mr-2" />
                       Content Admin
@@ -93,13 +84,13 @@ export default function HomePage() {
                   </motion.div>
                 </div>
 
-                <Card className="bg-slate-50 border-slate-200 shadow-inner">
-                  <CardContent className="text-center space-y-4 pt-6">
-                    <div className="mx-auto w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center border-2 border-slate-200">
-                      <GraduationCap className="w-6 h-6 text-slate-600" />
+                <Card className="bg-gray-50 border border-gray-200 shadow-sm rounded-xl">
+                  <CardContent className="text-center space-y-3 pt-4 pb-4">
+                    <div className="mx-auto w-10 h-10 bg-gradient-to-br from-blue-100 to-green-100 rounded-xl flex items-center justify-center">
+                      <GraduationCap className="w-5 h-5 text-gray-600" />
                     </div>
-                    <h3 className="font-semibold text-slate-900 text-lg">New to the platform?</h3>
-                    <p className="text-slate-600">
+                    <h3 className="font-semibold text-gray-900 text-base">New to the platform?</h3>
+                    <p className="text-gray-500 text-sm leading-relaxed">
                       Contact your administrator to get started with personalized AI coaching
                     </p>
                   </CardContent>
@@ -113,33 +104,33 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-slate-800 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-gray-50 flex items-center justify-center p-6">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.3 }}
         className="w-full max-w-md"
       >
-        <Card className="backdrop-blur-xl bg-white/95 border-slate-200 shadow-2xl">
-          <CardHeader className="text-center space-y-4 pb-8">
+        <Card className="bg-white border border-gray-200 shadow-lg shadow-gray-200/50 rounded-2xl">
+          <CardHeader className="text-center space-y-4 pb-4 px-6 pt-6">
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: "spring", stiffness: 200 }}
-              className="mx-auto w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-full flex items-center justify-center shadow-lg border-2 border-slate-300"
+              className="mx-auto w-12 h-12 bg-gradient-to-br from-blue-500 via-teal-500 to-green-500 rounded-2xl flex items-center justify-center shadow-lg"
             >
               {selectedRole === 'learner' ? (
-                <GraduationCap className="w-8 h-8 text-white" />
+                <GraduationCap className="w-6 h-6 text-white" />
               ) : (
-                <Settings className="w-8 h-8 text-white" />
+                <Settings className="w-6 h-6 text-white" />
               )}
             </motion.div>
             
             <div>
-              <CardTitle className="text-2xl font-bold text-slate-900 mb-2">
+              <CardTitle className="text-xl font-bold text-gray-900 mb-1">
                 Sign in as {selectedRole === 'learner' ? 'Learner' : 'Content Admin'}
               </CardTitle>
-              <CardDescription className="text-slate-600">
+              <CardDescription className="text-sm text-gray-500 leading-relaxed">
                 {selectedRole === 'learner' 
                   ? 'Access your assigned simulations and track progress'
                   : 'Manage content and learner assignments'
@@ -148,37 +139,37 @@ export default function HomePage() {
             </div>
           </CardHeader>
 
-          <CardContent className="space-y-6">
-            <form onSubmit={handleSignIn} className="space-y-5">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+          <CardContent className="space-y-4 px-6 pb-6">
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-gray-700">
                   Email Address
                 </label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
                     type="email"
                     placeholder="Enter your email address"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 h-12 bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:ring-slate-400/50"
+                    className="pl-10 h-10 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500/20 rounded-xl"
                     required
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-slate-700">
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-gray-700">
                   Password
                 </label>
                 <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <Input
                     type="password"
                     placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 h-12 bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:ring-slate-400/50"
+                    className="pl-10 h-10 bg-gray-50 border-gray-200 text-gray-900 placeholder:text-gray-400 focus:border-blue-500 focus:ring-blue-500/20 rounded-xl"
                     required
                   />
                 </div>
@@ -186,17 +177,17 @@ export default function HomePage() {
 
               <Button
                 type="submit"
-                className="w-full h-12 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-800 hover:to-slate-900 text-white font-semibold shadow-lg mt-6"
+                className="w-full h-10 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-200 hover:border-gray-300 font-semibold shadow-sm mt-4 rounded-xl"
               >
                 Sign in as {selectedRole === 'learner' ? 'Learner' : 'Content Admin'}
               </Button>
             </form>
 
-            <div className="text-center text-sm text-slate-600">
+            <div className="text-center text-sm text-gray-500">
               Don&apos;t have an account?{' '}
               <button 
                 onClick={resetSelection}
-                className="text-slate-700 hover:text-slate-900 font-medium hover:underline"
+                className="text-gray-700 hover:text-gray-900 font-medium hover:underline"
               >
                 Contact your administrator
               </button>
@@ -208,12 +199,12 @@ export default function HomePage() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.2 }}
-          className="mt-6 text-center"
+          className="mt-4 text-center"
         >
           <Button
             variant="ghost"
             onClick={resetSelection}
-            className="text-slate-300 hover:text-white hover:bg-white/10 font-medium"
+            className="text-gray-500 hover:text-gray-700 hover:bg-gray-100 font-medium rounded-xl"
           >
             ← Back to role selection
           </Button>

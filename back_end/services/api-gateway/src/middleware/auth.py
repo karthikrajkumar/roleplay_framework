@@ -5,7 +5,7 @@ This middleware handles JWT token validation, user authentication,
 and authorization for protected endpoints.
 """
 
-import jwt
+from jose import jwt
 from typing import Optional, List, Callable
 from fastapi import HTTPException, status, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
