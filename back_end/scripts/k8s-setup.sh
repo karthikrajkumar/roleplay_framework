@@ -189,13 +189,22 @@ setup_k3s() {
 install_ingress_controller() {
     if [[ "${CLUSTER_TYPE}" == "kind" ]]; then
         log_info "Installing NGINX Ingress Controller for Kind..."
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
-        
-        # Wait for ingress controller to be ready
-        kubectl wait --namespace ingress-nginx \
-            --for=condition=ready pod \
-            --selector=app.kubernetes.io/component=controller \
-            --timeout=300s
+        if kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml; then
+            log_info "Waiting for ingress controller to be ready..."
+            # Wait for ingress controller to be ready with better error handling
+            if kubectl wait --namespace ingress-nginx \
+                --for=condition=ready pod \
+                --selector=app.kubernetes.io/component=controller \
+                --timeout=300s 2>/dev/null; then
+                log_success "NGINX Ingress Controller is ready"
+            else
+                log_warning "Ingress controller pods not ready yet, but continuing..."
+                log_warning "You can check status later with: kubectl get pods -n ingress-nginx"
+            fi
+        else
+            log_warning "Failed to install NGINX Ingress Controller, but continuing..."
+            log_warning "NodePort services will still work for development"
+        fi
     fi
 }
 
