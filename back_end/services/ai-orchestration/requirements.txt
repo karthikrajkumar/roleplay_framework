@@ -1,0 +1,71 @@
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# AI/ML Libraries
+torch==2.1.2
+transformers==4.36.2
+sentence-transformers==2.2.2
+openai==1.6.1
+langchain==0.1.0
+langchain-community==0.0.10
+numpy==1.26.2
+scikit-learn==1.3.2
+
+# Neural Network and Deep Learning
+tensorflow==2.15.0
+keras==2.15.0
+
+# Natural Language Processing
+nltk==3.8.1
+spacy==3.7.2
+
+# Computer Vision (for avatar rendering integration)
+opencv-python==4.8.1.78
+pillow==10.1.0
+
+# Database
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
+
+# Caching
+redis==5.0.1
+aioredis==2.0.1
+
+# Configuration
+pydantic==2.5.2
+pydantic-settings==2.1.0
+
+# HTTP Client
+httpx==0.25.2
+aiohttp==3.9.1
+
+# Message Queue & Background Tasks
+celery==5.3.4
+kombu==5.3.4
+
+# Monitoring & Logging
+prometheus-client==0.19.0
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Service Discovery
+python-consul==1.1.0
+
+# Utilities
+python-dotenv==1.0.0
+click==8.1.7
+PyYAML==6.0.1
+python-dateutil==2.8.2
+
+# Vector Database for Embeddings
+chromadb==0.4.18
+pinecone-client==2.2.4
+
+# Memory and Context Management
+faiss-cpu==1.7.4
+
+# Async Support
+asyncio==3.4.3
+aiofiles==23.2.1
