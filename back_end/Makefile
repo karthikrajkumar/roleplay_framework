@@ -1,23 +1,57 @@
-# Makefile for AI Roleplay Platform Backend
+# Makefile for AI Roleplay Platform Backend - Kubernetes Native
 
 # Variables
-DOCKER_COMPOSE = docker-compose
+KUBECTL = kubectl
 PYTHON = python3
 PIP = pip3
 PROJECT_NAME = roleplay-platform
+NAMESPACE = roleplay-platform
+KUBE_CONTEXT = $(shell kubectl config current-context)
+
+# Kubernetes Development Environment
+K8S_CLUSTER_TYPE ?= kind  # kind, minikube, or k3s
+K8S_LOCAL_REGISTRY ?= localhost:5001
+K8S_NODE_PORT_BASE ?= 30000
+
+# Docker Registry for Development
+REGISTRY ?= $(K8S_LOCAL_REGISTRY)
+TAG ?= latest
 
 # Colors for output
 RED = \033[0;31m
 GREEN = \033[0;32m
 YELLOW = \033[0;33m
+BLUE = \033[0;34m
+CYAN = \033[0;36m
 NC = \033[0m # No Color
 
-.PHONY: help install test clean build up down logs restart health format lint security
+# Service list from architecture
+SERVICES = api-gateway user-management ai-orchestration notification analytics real-time-communication
+
+.PHONY: help install test clean build up down logs restart health format lint security \
+        k8s-setup k8s-build k8s-deploy k8s-dev k8s-health k8s-logs k8s-cleanup k8s-namespace k8s-secrets \
+        k8s-build-service k8s-deploy-dev k8s-logs-service k8s-port-forward k8s-shell k8s-restart \
+        k8s-restart-service k8s-status k8s-db-init k8s-db-migrate k8s-db-upgrade k8s-db-reset \
+        k8s-stop k8s-clean k8s-clean-all
 
 help: ## Show this help message
-	@echo "AI Roleplay Platform Backend - Development Commands"
-	@echo "================================================="
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo "$(CYAN)AI Roleplay Platform Backend - Kubernetes Native Development$(NC)"
+	@echo "=============================================================="
+	@echo "$(BLUE)Current Kubernetes Context: $(KUBE_CONTEXT)$(NC)"
+	@echo "$(BLUE)Target Namespace: $(NAMESPACE)$(NC)"
+	@echo "$(BLUE)Registry: $(REGISTRY)$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Kubernetes Development Commands:$(NC)"
+	@awk 'BEGIN {FS = ":.*?## "} /^k8s-[a-zA-Z_-]+:.*?## / {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "$(YELLOW)Traditional Development Commands:$(NC)"
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / && !/^k8s-/ {printf "\033[36m%-25s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "$(YELLOW)Quick Start:$(NC)"
+	@echo "  1. $(CYAN)make k8s-dev$(NC)        - Complete development setup (first time)"
+	@echo "  2. $(CYAN)make k8s-reset-dev$(NC)  - Complete reset and rebuild (destroys everything)"
+	@echo "  3. $(CYAN)make k8s-health$(NC)     - Check all services"
+	@echo "  4. $(CYAN)make k8s-logs$(NC)       - View all service logs"
 
 # Development Setup
 install: ## Install dependencies for all services
@@ -50,117 +84,236 @@ setup-env: ## Copy environment file and setup initial configuration
 		echo "$(YELLOW).env file already exists$(NC)"; \
 	fi
 
-# Database Operations
-db-init: ## Initialize database with migrations
+# =======================================
+# Kubernetes Development Commands
+# =======================================
+
+k8s-setup: ## Setup local Kubernetes cluster (kind/minikube/k3s)
+	@echo "$(YELLOW)Setting up local Kubernetes cluster ($(K8S_CLUSTER_TYPE))...$(NC)"
+	@./scripts/k8s-setup.sh $(K8S_CLUSTER_TYPE)
+	@echo "$(GREEN)Kubernetes cluster setup completed!$(NC)"
+
+k8s-dev: k8s-setup k8s-namespace k8s-secrets k8s-build k8s-deploy-dev k8s-db-init ## Complete development setup
+	@echo "$(GREEN)Kubernetes development environment ready!$(NC)"
+	@echo "$(YELLOW)Services are accessible via NodePort:$(NC)"
+	@echo "$(CYAN)  API Gateway: http://localhost:$(shell echo $$(($(K8S_NODE_PORT_BASE) + 0)))/health/$(NC)"
+	@echo "$(CYAN)  Documentation: http://localhost:$(shell echo $$(($(K8S_NODE_PORT_BASE) + 0)))/docs$(NC)"
+	@echo "$(CYAN)  Grafana: http://localhost:$(shell echo $$(($(K8S_NODE_PORT_BASE) + 10)))$(NC)"
+
+k8s-reset-dev: ## Complete reset and rebuild - destroys everything and recreates from scratch
+	@echo "$(RED)WARNING: This will completely destroy and recreate the entire development environment!$(NC)"
+	@echo "$(RED)This includes: cluster, registry, networks, images, and all data! Continue? (y/N)$(NC)"
+	@read -r response; \
+	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
+		echo "$(YELLOW)Step 1/5: Cleaning up existing cluster and resources...$(NC)"; \
+		./scripts/k8s-cleanup.sh $(K8S_CLUSTER_TYPE) || true; \
+		docker system prune -af --volumes || true; \
+		echo "$(YELLOW)Step 2/5: Setting up fresh Kubernetes cluster...$(NC)"; \
+		./scripts/k8s-setup.sh $(K8S_CLUSTER_TYPE); \
+		echo "$(YELLOW)Step 3/5: Creating namespace and secrets...$(NC)"; \
+		$(KUBECTL) create namespace $(NAMESPACE) --dry-run=client -o yaml | $(KUBECTL) apply -f -; \
+		./scripts/k8s-create-secrets.sh $(NAMESPACE); \
+		echo "$(YELLOW)Step 4/5: Building and pushing all images...$(NC)"; \
+		./scripts/build-images.sh $(REGISTRY) latest; \
+		echo "$(YELLOW)Step 5/5: Deploying services and initializing database...$(NC)"; \
+		./scripts/k8s-deploy-dev.sh $(NAMESPACE) $(REGISTRY) latest $(K8S_NODE_PORT_BASE); \
+		$(KUBECTL) exec -n $(NAMESPACE) deployment/user-management -- alembic upgrade head 2>/dev/null || echo "Database init skipped (service not ready)"; \
+		echo "$(GREEN)Complete reset and rebuild finished!$(NC)"; \
+		echo "$(YELLOW)Services are accessible via NodePort:$(NC)"; \
+		echo "$(CYAN)  API Gateway: http://localhost:$(shell echo $$(($(K8S_NODE_PORT_BASE) + 0)))/health/$(NC)"; \
+		echo "$(CYAN)  Documentation: http://localhost:$(shell echo $$(($(K8S_NODE_PORT_BASE) + 0)))/docs$(NC)"; \
+		echo "$(CYAN)  Grafana: http://localhost:$(shell echo $$(($(K8S_NODE_PORT_BASE) + 10)))$(NC)"; \
+	else \
+		echo "$(YELLOW)Reset cancelled$(NC)"; \
+	fi
+
+k8s-namespace: ## Create Kubernetes namespace
+	@echo "$(YELLOW)Creating namespace $(NAMESPACE)...$(NC)"
+	@$(KUBECTL) create namespace $(NAMESPACE) --dry-run=client -o yaml | $(KUBECTL) apply -f -
+	@echo "$(GREEN)Namespace created/updated successfully!$(NC)"
+
+k8s-secrets: ## Create Kubernetes secrets
+	@echo "$(YELLOW)Creating Kubernetes secrets...$(NC)"
+	@./scripts/k8s-create-secrets.sh $(NAMESPACE)
+	@echo "$(GREEN)Secrets created successfully!$(NC)"
+
+k8s-build: ## Build and push Docker images for all services
+	@echo "$(YELLOW)Building and pushing Docker images...$(NC)"
+	@./scripts/build-images.sh $(REGISTRY) $(TAG)
+	@echo "$(GREEN)All images built and pushed successfully!$(NC)"
+
+k8s-build-service: ## Build specific service (usage: make k8s-build-service SERVICE=api-gateway)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "$(RED)Please specify SERVICE variable$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Building $(SERVICE)...$(NC)"
+	@docker build -t $(REGISTRY)/$(PROJECT_NAME)-$(SERVICE):$(TAG) ./services/$(SERVICE)/
+	@docker push $(REGISTRY)/$(PROJECT_NAME)-$(SERVICE):$(TAG)
+	@echo "$(GREEN)$(SERVICE) built and pushed successfully!$(NC)"
+
+k8s-deploy: ## Deploy production Kubernetes manifests
+	@echo "$(YELLOW)Deploying production manifests to Kubernetes...$(NC)"
+	@$(KUBECTL) apply -f infrastructure/kubernetes/distributed-architecture.yaml
+	@echo "$(GREEN)Production deployment completed!$(NC)"
+
+k8s-deploy-dev: ## Deploy development Kubernetes manifests
+	@echo "$(YELLOW)Deploying development manifests to Kubernetes...$(NC)"
+	@./scripts/k8s-deploy-dev.sh $(NAMESPACE) $(REGISTRY) $(TAG) $(K8S_NODE_PORT_BASE)
+	@echo "$(GREEN)Development deployment completed!$(NC)"
+
+k8s-health: ## Check health of all Kubernetes services
+	@echo "$(YELLOW)Checking Kubernetes service health...$(NC)"
+	@./scripts/k8s-health-check.sh $(NAMESPACE)
+
+k8s-logs: ## Show logs from all services
+	@echo "$(YELLOW)Showing logs from all services...$(NC)"
+	@$(KUBECTL) logs -n $(NAMESPACE) -l app.kubernetes.io/part-of=$(PROJECT_NAME) --tail=100 -f
+
+k8s-logs-service: ## Show logs from specific service (usage: make k8s-logs-service SERVICE=api-gateway)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "$(RED)Please specify SERVICE variable$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Showing logs for $(SERVICE)...$(NC)"
+	@$(KUBECTL) logs -n $(NAMESPACE) -l app=$(SERVICE) --tail=100 -f
+
+k8s-port-forward: ## Setup port forwarding for development (usage: make k8s-port-forward SERVICE=api-gateway PORT=8000)
+	@if [ -z "$(SERVICE)" ] || [ -z "$(PORT)" ]; then \
+		echo "$(RED)Please specify SERVICE and PORT variables$(NC)"; \
+		echo "Example: make k8s-port-forward SERVICE=api-gateway PORT=8000"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Setting up port forwarding for $(SERVICE) on port $(PORT)...$(NC)"
+	@$(KUBECTL) port-forward -n $(NAMESPACE) service/$(SERVICE) $(PORT):$(PORT)
+
+k8s-shell: ## Open shell in service pod (usage: make k8s-shell SERVICE=api-gateway)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "$(RED)Please specify SERVICE variable$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Opening shell in $(SERVICE) pod...$(NC)"
+	@$(KUBECTL) exec -it -n $(NAMESPACE) deployment/$(SERVICE) -- /bin/bash
+
+k8s-stop: ## Stop the Kubernetes development environment (removes namespace only)
+	@echo "$(YELLOW)Stopping Kubernetes development environment...$(NC)"
+	@echo "$(RED)This will delete namespace $(NAMESPACE) and all its resources! Continue? (y/N)$(NC)"
+	@read -r response; \
+	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
+		$(KUBECTL) delete namespace $(NAMESPACE) --ignore-not-found=true; \
+		echo "$(GREEN)Development environment stopped!$(NC)"; \
+	else \
+		echo "$(YELLOW)Stop cancelled$(NC)"; \
+	fi
+
+k8s-clean: ## Clean up Kubernetes cluster and Docker resources
+	@echo "$(YELLOW)Cleaning up Kubernetes cluster and Docker resources...$(NC)"
+	@echo "$(RED)This will delete the entire cluster, registry, and Docker images! Continue? (y/N)$(NC)"
+	@read -r response; \
+	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
+		./scripts/k8s-cleanup.sh $(K8S_CLUSTER_TYPE); \
+		echo "$(GREEN)Cluster and resources cleaned up!$(NC)"; \
+	else \
+		echo "$(YELLOW)Cleanup cancelled$(NC)"; \
+	fi
+
+k8s-clean-all: ## Force clean up everything (cluster, Docker, networks, images)
+	@echo "$(RED)WARNING: This will force delete EVERYTHING including all Docker resources!$(NC)"
+	@echo "$(RED)This includes: cluster, registry, networks, images, and containers! Continue? (y/N)$(NC)"
+	@read -r response; \
+	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
+		./scripts/k8s-cleanup.sh all; \
+		docker system prune -af --volumes; \
+		echo "$(GREEN)Everything cleaned up!$(NC)"; \
+	else \
+		echo "$(YELLOW)Cleanup cancelled$(NC)"; \
+	fi
+
+k8s-cleanup: ## Cleanup all Kubernetes resources (legacy command - use k8s-stop instead)
+	@echo "$(YELLOW)Note: This is a legacy command. Use 'make k8s-stop' or 'make k8s-clean' instead.$(NC)"
+	@$(MAKE) k8s-stop
+
+k8s-restart: ## Restart all services
+	@echo "$(YELLOW)Restarting all services...$(NC)"
+	@$(KUBECTL) rollout restart -n $(NAMESPACE) deployment
+	@echo "$(GREEN)All services restarted!$(NC)"
+
+k8s-restart-service: ## Restart specific service (usage: make k8s-restart-service SERVICE=api-gateway)
+	@if [ -z "$(SERVICE)" ]; then \
+		echo "$(RED)Please specify SERVICE variable$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(YELLOW)Restarting $(SERVICE)...$(NC)"
+	@$(KUBECTL) rollout restart -n $(NAMESPACE) deployment/$(SERVICE)
+	@echo "$(GREEN)$(SERVICE) restarted!$(NC)"
+
+k8s-status: ## Show status of all Kubernetes resources
+	@echo "$(YELLOW)Showing Kubernetes resource status...$(NC)"
+	@echo "$(CYAN)Namespace:$(NC)"
+	@$(KUBECTL) get namespace $(NAMESPACE)
+	@echo ""
+	@echo "$(CYAN)Pods:$(NC)"
+	@$(KUBECTL) get pods -n $(NAMESPACE)
+	@echo ""
+	@echo "$(CYAN)Services:$(NC)"
+	@$(KUBECTL) get services -n $(NAMESPACE)
+	@echo ""
+	@echo "$(CYAN)Deployments:$(NC)"
+	@$(KUBECTL) get deployments -n $(NAMESPACE)
+
+# Database Operations (Kubernetes)
+k8s-db-init: ## Initialize database with migrations
 	@echo "$(YELLOW)Initializing database...$(NC)"
-	@$(DOCKER_COMPOSE) exec user-management alembic upgrade head
+	@$(KUBECTL) exec -n $(NAMESPACE) deployment/user-management -- alembic upgrade head
 	@echo "$(GREEN)Database initialized successfully!$(NC)"
 
-db-migrate: ## Create new database migration
+k8s-db-migrate: ## Create new database migration
 	@echo "$(YELLOW)Creating new migration...$(NC)"
-	@$(DOCKER_COMPOSE) exec user-management alembic revision --autogenerate -m "$(MSG)"
+	@$(KUBECTL) exec -n $(NAMESPACE) deployment/user-management -- alembic revision --autogenerate -m "$(MSG)"
 	@echo "$(GREEN)Migration created successfully!$(NC)"
 
-db-upgrade: ## Apply database migrations
+k8s-db-upgrade: ## Apply database migrations
 	@echo "$(YELLOW)Applying database migrations...$(NC)"
-	@$(DOCKER_COMPOSE) exec user-management alembic upgrade head
+	@$(KUBECTL) exec -n $(NAMESPACE) deployment/user-management -- alembic upgrade head
 	@echo "$(GREEN)Migrations applied successfully!$(NC)"
 
-db-downgrade: ## Downgrade database migration
-	@echo "$(YELLOW)Downgrading database...$(NC)"
-	@$(DOCKER_COMPOSE) exec user-management alembic downgrade -1
-	@echo "$(GREEN)Database downgraded successfully!$(NC)"
-
-db-reset: ## Reset database (WARNING: This will delete all data)
+k8s-db-reset: ## Reset database (WARNING: This will delete all data)
 	@echo "$(RED)WARNING: This will delete all data! Are you sure? (y/N)$(NC)"
 	@read -r response; \
 	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
-		$(DOCKER_COMPOSE) down -v; \
-		$(DOCKER_COMPOSE) up -d postgres redis; \
-		sleep 10; \
-		$(DOCKER_COMPOSE) exec user-management alembic upgrade head; \
+		$(KUBECTL) delete pod -n $(NAMESPACE) -l app=postgres-primary; \
+		$(KUBECTL) delete pvc -n $(NAMESPACE) -l app=postgres-primary; \
+		sleep 30; \
+		$(KUBECTL) wait --for=condition=ready pod -n $(NAMESPACE) -l app=postgres-primary --timeout=300s; \
+		$(KUBECTL) exec -n $(NAMESPACE) deployment/user-management -- alembic upgrade head; \
 		echo "$(GREEN)Database reset successfully!$(NC)"; \
 	else \
 		echo "$(YELLOW)Database reset cancelled$(NC)"; \
 	fi
 
-# Docker Operations
-build: ## Build all Docker images
-	@echo "$(YELLOW)Building Docker images...$(NC)"
-	@$(DOCKER_COMPOSE) build
-	@echo "$(GREEN)Docker images built successfully!$(NC)"
+# =======================================
+# Legacy Docker Operations (for compatibility)
+# =======================================
 
-build-no-cache: ## Build all Docker images without cache
-	@echo "$(YELLOW)Building Docker images without cache...$(NC)"
-	@$(DOCKER_COMPOSE) build --no-cache
-	@echo "$(GREEN)Docker images built successfully!$(NC)"
+build: k8s-build ## Build all Docker images (Kubernetes version)
 
-up: ## Start all services
-	@echo "$(YELLOW)Starting all services...$(NC)"
-	@$(DOCKER_COMPOSE) up -d
-	@echo "$(GREEN)All services started!$(NC)"
-	@echo "$(YELLOW)Waiting for services to be ready...$(NC)"
-	@sleep 15
-	@make health
+up: k8s-deploy-dev ## Start all services (Kubernetes version)
 
-up-build: ## Build and start all services
-	@echo "$(YELLOW)Building and starting all services...$(NC)"
-	@$(DOCKER_COMPOSE) up -d --build
-	@echo "$(GREEN)All services built and started!$(NC)"
+down: k8s-stop ## Stop all services (Kubernetes version)
 
-down: ## Stop all services
-	@echo "$(YELLOW)Stopping all services...$(NC)"
-	@$(DOCKER_COMPOSE) down
-	@echo "$(GREEN)All services stopped!$(NC)"
+restart: k8s-restart ## Restart all services (Kubernetes version)
 
-down-volumes: ## Stop all services and remove volumes
-	@echo "$(RED)WARNING: This will delete all persistent data! Are you sure? (y/N)$(NC)"
-	@read -r response; \
-	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
-		$(DOCKER_COMPOSE) down -v; \
-		echo "$(GREEN)All services and volumes removed!$(NC)"; \
-	else \
-		echo "$(YELLOW)Operation cancelled$(NC)"; \
-	fi
+restart-service: k8s-restart-service ## Restart a specific service (Kubernetes version)
 
-restart: ## Restart all services
-	@echo "$(YELLOW)Restarting all services...$(NC)"
-	@$(DOCKER_COMPOSE) restart
-	@echo "$(GREEN)All services restarted!$(NC)"
+# =======================================
+# Legacy Logging and Monitoring (redirected to Kubernetes)
+# =======================================
 
-restart-service: ## Restart a specific service (usage: make restart-service SERVICE=api-gateway)
-	@if [ -z "$(SERVICE)" ]; then \
-		echo "$(RED)Please specify SERVICE variable (e.g., make restart-service SERVICE=api-gateway)$(NC)"; \
-		exit 1; \
-	fi
-	@echo "$(YELLOW)Restarting $(SERVICE)...$(NC)"
-	@$(DOCKER_COMPOSE) restart $(SERVICE)
-	@echo "$(GREEN)$(SERVICE) restarted!$(NC)"
+logs: k8s-logs ## Show logs from all services (Kubernetes version)
 
-# Logging and Monitoring
-logs: ## Show logs from all services
-	@$(DOCKER_COMPOSE) logs -f
+logs-service: k8s-logs-service ## Show logs from specific service (Kubernetes version)
 
-logs-service: ## Show logs from a specific service (usage: make logs-service SERVICE=api-gateway)
-	@if [ -z "$(SERVICE)" ]; then \
-		echo "$(RED)Please specify SERVICE variable (e.g., make logs-service SERVICE=api-gateway)$(NC)"; \
-		exit 1; \
-	fi
-	@$(DOCKER_COMPOSE) logs -f $(SERVICE)
-
-health: ## Check health of all services
-	@echo "$(YELLOW)Checking service health...$(NC)"
-	@services=("api-gateway:8000" "user-management:8001" "roleplay-service:8002" "ai-orchestration:8003" "notification-service:8004" "analytics-service:8005"); \
-	for service in "$${services[@]}"; do \
-		name=$${service%%:*}; \
-		port=$${service##*:}; \
-		echo -n "Checking $$name... "; \
-		if curl -sf http://localhost:$$port/health >/dev/null 2>&1; then \
-			echo "$(GREEN)✓ Healthy$(NC)"; \
-		else \
-			echo "$(RED)✗ Unhealthy$(NC)"; \
-		fi; \
-	done
+health: k8s-health ## Check health of all services (Kubernetes version)
 
 # Testing
 test: ## Run all tests
@@ -234,37 +387,27 @@ clean-all: ## Clean up everything including images
 		echo "$(YELLOW)Cleanup cancelled$(NC)"; \
 	fi
 
-ps: ## Show running containers
-	@$(DOCKER_COMPOSE) ps
+ps: k8s-status ## Show running containers (Kubernetes version)
 
-exec: ## Execute command in a service container (usage: make exec SERVICE=api-gateway CMD="bash")
-	@if [ -z "$(SERVICE)" ] || [ -z "$(CMD)" ]; then \
-		echo "$(RED)Please specify SERVICE and CMD variables$(NC)"; \
-		echo "Example: make exec SERVICE=api-gateway CMD=\"bash\""; \
-		exit 1; \
-	fi
-	@$(DOCKER_COMPOSE) exec $(SERVICE) $(CMD)
+exec: k8s-shell ## Execute shell in service container (Kubernetes version)
 
-shell: ## Open bash shell in a service container (usage: make shell SERVICE=api-gateway)
-	@if [ -z "$(SERVICE)" ]; then \
-		echo "$(RED)Please specify SERVICE variable$(NC)"; \
-		exit 1; \
-	fi
-	@$(DOCKER_COMPOSE) exec $(SERVICE) bash
+shell: k8s-shell ## Open bash shell in service container (Kubernetes version)
 
-# Development Workflow
-dev: setup-env up-build db-init ## Complete development setup (setup env, build, start, init db)
-	@echo "$(GREEN)Development environment ready!$(NC)"
-	@echo "$(YELLOW)API Gateway: http://localhost:8000$(NC)"
-	@echo "$(YELLOW)Documentation: http://localhost:8000/docs$(NC)"
+# =======================================
+# Development Workflow (Kubernetes Native)
+# =======================================
 
-# Production Commands
-prod-build: ## Build production images
-	@echo "$(YELLOW)Building production images...$(NC)"
-	@$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml build
-	@echo "$(GREEN)Production images built!$(NC)"
+dev: k8s-dev ## Complete development setup (Kubernetes version)
 
-prod-up: ## Start production services
-	@echo "$(YELLOW)Starting production services...$(NC)"
-	@$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.prod.yml up -d
-	@echo "$(GREEN)Production services started!$(NC)"
+# Legacy development workflow (redirected to Kubernetes)
+setup-env-dev: setup-env k8s-dev ## Complete development setup with environment
+
+# =======================================
+# Production Commands (Kubernetes)
+# =======================================
+
+prod-build: k8s-build ## Build production images (Kubernetes version)
+
+prod-deploy: k8s-deploy ## Deploy to production Kubernetes
+
+prod-up: k8s-deploy ## Start production services (Kubernetes version)
