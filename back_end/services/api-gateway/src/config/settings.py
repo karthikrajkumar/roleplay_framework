@@ -7,7 +7,8 @@ for validation and environment variable loading.
 
 from functools import lru_cache
 from typing import List, Optional
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 import secrets
 
 
@@ -90,7 +91,8 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = False
         
-    @validator('environment')
+    @field_validator('environment')
+    @classmethod
     def validate_environment(cls, v):
         """Validate environment setting."""
         allowed = ['development', 'staging', 'production']
@@ -98,7 +100,8 @@ class Settings(BaseSettings):
             raise ValueError(f'Environment must be one of: {allowed}')
         return v
     
-    @validator('log_level')
+    @field_validator('log_level')
+    @classmethod
     def validate_log_level(cls, v):
         """Validate log level."""
         allowed = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
@@ -106,7 +109,8 @@ class Settings(BaseSettings):
             raise ValueError(f'Log level must be one of: {allowed}')
         return v.upper()
     
-    @validator('log_format')
+    @field_validator('log_format')
+    @classmethod
     def validate_log_format(cls, v):
         """Validate log format."""
         allowed = ['json', 'text']
