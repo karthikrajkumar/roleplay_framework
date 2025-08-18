@@ -21,6 +21,13 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://roleplay_user:XIDvqyH9ugCp0Tja5eAvW7Oyy@postgres:5432/roleplay_platform",
         description="Database connection URL"
     )
+    
+    # Individual DB components for flexibility
+    db_user: str = Field(default="roleplay_user", description="Database user")
+    db_password: str = Field(default="XIDvqyH9ugCp0Tja5eAvW7Oyy", description="Database password") 
+    db_host: str = Field(default="postgres", description="Database host")
+    db_port: int = Field(default=5432, description="Database port")
+    db_name: str = Field(default="roleplay_platform", description="Database name")
     db_pool_size: int = Field(default=10, description="Database connection pool size")
     db_max_overflow: int = Field(default=20, description="Database connection pool max overflow")
     

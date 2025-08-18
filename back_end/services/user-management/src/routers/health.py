@@ -6,7 +6,7 @@ router = APIRouter()
 settings = get_settings()
 
 
-@router.get("/health")
+@router.get("/")
 async def health_check():
     """Health check endpoint for user management service."""
     return {

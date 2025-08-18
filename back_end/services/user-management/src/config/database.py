@@ -40,9 +40,33 @@ async def init_database():
     
     settings = get_settings()
     
+    # Construct database URL dynamically as fallback
+    db_url = settings.database_url
+    print(f"Original database URL: {db_url.replace(settings.db_password if settings.db_password in db_url else 'XXX', '***')}")
+    
+    # Always use constructed URL to ensure consistency
+    db_url = f"postgresql+asyncpg://{settings.db_user}:{settings.db_password}@{settings.db_host}:{settings.db_port}/{settings.db_name}"
+    print(f"Using constructed database URL: {db_url.replace(settings.db_password, '***')}")
+    
+    # Test basic connection first
+    try:
+        import asyncpg
+        test_conn = await asyncpg.connect(
+            user=settings.db_user,
+            password=settings.db_password, 
+            database=settings.db_name,
+            host=settings.db_host,
+            port=settings.db_port
+        )
+        await test_conn.close()
+        print("✓ Basic asyncpg connection test successful")
+    except Exception as e:
+        print(f"✗ Basic asyncpg connection failed: {e}")
+        raise
+    
     # Create async engine
     engine = create_async_engine(
-        settings.database_url,
+        db_url,
         echo=settings.debug,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
