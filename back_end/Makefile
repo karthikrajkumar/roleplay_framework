@@ -148,7 +148,7 @@ k8s-build-service: ## Build specific service (usage: make k8s-build-service SERV
 		exit 1; \
 	fi
 	@echo "$(YELLOW)Building $(SERVICE)...$(NC)"
-	@docker build -t $(REGISTRY)/$(PROJECT_NAME)-$(SERVICE):$(TAG) ./services/$(SERVICE)/
+	@docker build -t $(REGISTRY)/$(PROJECT_NAME)-$(SERVICE):$(TAG) -f ./services/$(SERVICE)/Dockerfile .
 	@docker push $(REGISTRY)/$(PROJECT_NAME)-$(SERVICE):$(TAG)
 	@echo "$(GREEN)$(SERVICE) built and pushed successfully!$(NC)"
 

@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
-COPY requirements-dev.txt .
+COPY services/user-management/requirements.txt .
+COPY services/user-management/requirements-dev.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
@@ -45,10 +45,10 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
-COPY . .
+COPY services/user-management/ .
 
-# Shared library will be added when needed
-# COPY ../../shared ./shared
+# Copy shared library
+COPY shared/ ./shared
 
 # Set permissions
 RUN chown -R appuser:appuser /app
