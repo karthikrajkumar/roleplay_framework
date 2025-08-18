@@ -8,17 +8,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY services/real-time-communication/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY services/real-time-communication/ .
+COPY . .
 
-# Copy shared library (Note: shared library should be copied from build context)
-# The shared directory should be copied at build time using build context
-# Example: docker build -f services/real-time-communication/Dockerfile --build-arg SHARED_PATH=./shared .
-ARG SHARED_PATH=./shared
-COPY ${SHARED_PATH} ./shared
+# Copy shared library from parent directory
+COPY ../../shared ./shared
 
 # Create non-root user
 RUN useradd --create-home --shell /bin/bash app \
