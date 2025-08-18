@@ -18,9 +18,11 @@ class Settings(BaseSettings):
     
     # Database Configuration
     database_url: str = Field(
-        default="postgresql+asyncpg://roleplay_user:password@postgres:5432/roleplay_platform",
+        default="postgresql+asyncpg://roleplay_user:XIDvqyH9ugCp0Tja5eAvW7Oyy@postgres:5432/roleplay_platform",
         description="Database connection URL"
     )
+    db_pool_size: int = Field(default=10, description="Database connection pool size")
+    db_max_overflow: int = Field(default=20, description="Database connection pool max overflow")
     
     # Redis Configuration
     redis_url: str = Field(

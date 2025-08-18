@@ -55,7 +55,7 @@ class BaseEntity(BaseModel, ABC):
     status: EntityStatus = Field(default=EntityStatus.ACTIVE, description="Entity status")
     
     # Event sourcing
-    _domain_events: List[DomainEvent] = Field(default_factory=list, exclude=True)
+    domain_events: List[DomainEvent] = Field(default_factory=list, exclude=True)
     
     class Config:
         """Pydantic configuration."""
@@ -70,12 +70,12 @@ class BaseEntity(BaseModel, ABC):
     
     def add_domain_event(self, event: DomainEvent) -> None:
         """Add a domain event to be published."""
-        self._domain_events.append(event)
+        self.domain_events.append(event)
     
     def clear_domain_events(self) -> List[DomainEvent]:
         """Clear and return all domain events."""
-        events = self._domain_events.copy()
-        self._domain_events.clear()
+        events = self.domain_events.copy()
+        self.domain_events.clear()
         return events
     
     def mark_as_modified(self, modified_by: Optional[UUID] = None) -> None:
