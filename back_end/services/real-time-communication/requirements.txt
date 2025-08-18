@@ -8,7 +8,6 @@ python-socketio==5.10.0
 
 # Real-time Communication
 aiohttp==3.9.1
-socketio==5.10.0
 
 # Database
 sqlalchemy[asyncio]==2.0.23
