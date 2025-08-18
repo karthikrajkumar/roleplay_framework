@@ -47,8 +47,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
-# Copy shared library from parent directory
-COPY ../../shared ./shared
+# Shared library will be added when needed
+# COPY ../../shared ./shared
 
 # Set permissions
 RUN chown -R appuser:appuser /app
